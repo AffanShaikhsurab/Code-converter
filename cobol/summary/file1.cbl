@@ -1,0 +1,3 @@
+This COBOL code summarizes to: The program, File1, performs an addition operation on two variables VAR1 and VAR2, and displays the result. It has a main logic section and a subsection called ADD-VARS that contains the addition operation. The program starts by displaying "File1: Start of program" and ends by stopping the run.
+
+The COBOL code does not depend on any external files. All the data used in this program are defined and stored within the program itself in the WORKING-STORAGE SECTION.

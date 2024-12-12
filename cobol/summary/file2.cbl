@@ -1,0 +1,1 @@
+The provided COBOL code defines a program named "File2" that depends on a file named "file1.cbl". This is inferred from the LINKAGE SECTION which takes a variable named FILE1-VAR1 from the linked file. The program receives the value of FILE1-VAR1, displays it, computes its double, and stores the result in the variable VAR3, which is then displayed before the program stops.
