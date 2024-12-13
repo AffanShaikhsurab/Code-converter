@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+networkx
+pydantic
+langchain
+langchain-google-genai
+groq
+requests
+PyGithub
