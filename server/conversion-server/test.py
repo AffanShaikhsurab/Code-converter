@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 import networkx as nx
-from typing import Any, Dict, List
+from typing import Any, Dict, Generator, List
 from groq import Groq
 from pydantic import BaseModel
 from pydantic import BaseModel, Field
@@ -16,7 +16,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import PromptTemplate
 from langchain.output_parsers import PydanticOutputParser
 from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 # Initialize Groq AI
 groq = Groq(api_key="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")
 from fastapi.middleware.cors import CORSMiddleware
@@ -348,7 +348,7 @@ input_value = {repr(input_value)}
         print(f"File preparation error: {file_error}")
         return False, str(file_error)
 
-def improve_recipe(code: str, error: str, testCase: str, attempts: int) -> Code:
+def improve_recipe(code: str, error: str, testCase: str, attempts: int) -> Generator[str, None, Code]:
     """
     Improve the code based on the error encountered with dynamic model selection.
     
@@ -361,6 +361,8 @@ def improve_recipe(code: str, error: str, testCase: str, attempts: int) -> Code:
     Returns:
         Code: Improved code with updated implementation
     """
+    yield from stream_output(f"Improving the code with error {error} (Attempt {attempts}).... ")
+
     print(f"Improving the code with error {error} (Attempt {attempts}).... ")
 
     # Dynamic model selection based on attempts
@@ -373,7 +375,8 @@ def improve_recipe(code: str, error: str, testCase: str, attempts: int) -> Code:
     
     # Default to the base model if attempts don't match the mapping
     selected_model = model_mapping.get(attempts, "gemini-1.5-flash-002")
-    
+    yield from stream_output(f"Selected model: {selected_model}")
+
     print(f"Selected model: {selected_model}")
 
     # Use the dynamically selected model with context about the error
@@ -419,18 +422,20 @@ def improve_recipe(code: str, error: str, testCase: str, attempts: int) -> Code:
     
     improvement_chain = improvement_prompt_template | llm | code_parser
     print("Code improvement process initiated...")
-    
+    yield from stream_output(f"Code improvement process initiated...")
+
     improved_code = improvement_chain.invoke({
         "original_code": code,
         "error_message": error,
         "test_case": testCase,
         "attempt_number": attempts
     })
-    
+    yield from stream_output(f"Code improved successfully (Attempt {attempts}).")
+
     print(f"Code improved successfully (Attempt {attempts}).")
     return improved_code
 
-def ai_agent(code_string: str, testCase: str, file_name: str, folder_path: str, max_attempts: int = 5) -> str:
+def ai_agent(code_string: str, testCase: str, file_name: str, folder_path: str, max_attempts: int = 5) :
     """
     Agent to execute code, save successful implementation, or save for manual review if max attempts reached.
     
@@ -454,11 +459,16 @@ def ai_agent(code_string: str, testCase: str, file_name: str, folder_path: str, 
             os.makedirs(os.path.dirname(output_file), exist_ok=True)  # Ensure the "converted" folder exists
             with open(output_file, 'w') as f:
                 f.write(code_string)
+            yield from stream_output(f"Converted {file_name} -> {output_file}")
+            yield from stream_output(f"Successful execution on attempt {attempt + 1} with result {result}")
+
             print(f"Converted {file_name} -> {output_file}")
             print(f"Successful execution on attempt {attempt + 1} with result {result}")
             return code_string
         else:
             # Attempt to improve the code
+            yield from stream_output(f"Improvement attempt {attempt + 1}")
+
             print(f"Improvement attempt {attempt + 1}")
             try:
                 improved_code = improve_recipe(code_string, result, testCase , attempt + 1)
@@ -532,12 +542,15 @@ app.add_middleware(
 
 # Main function to process files
 
-@app.post("/process")
-async def process_files(
+@app.post("/process", response_class=StreamingResponse)
+def process_files(
     folder_path: str = Form(...),  # Folder path input
     files: List[UploadFile] = File(...)  # Multiple file uploads
 ):
     """Process files in a folder: summarize, analyze dependencies, and convert."""
+    
+    
+    
     # Save uploaded files to the folder
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
@@ -550,19 +563,21 @@ async def process_files(
     try:
         # Step 1: Summarize all files
         all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
-        print("Using AI agent to summarize files...")
+        yield from stream_output("Summarizing files...")
 
         summaries = [summarize_file(file) for file in all_files]
+        yield from stream_output(f"Summarized {len(summaries)} files")
 
         # Step 2: Analyze dependencies
-        print("Using AI agent to analyze dependencies...")
+        yield from stream_output("Using AI agent to analyze dependencies...")
 
         dependency_graph = analyze_dependencies(summaries)
 
         # Step 3: Traverse the graph and convert files
-        print("Dependency Graph Edges:")
+        yield from stream_output("Dependency Graph Details:")
         for edge in dependency_graph.edges:
-            print(f"  {edge} -> {dependency_graph.edges[edge]}")
+            yield from stream_output(f"  {edge} -> {dependency_graph.edges[edge]}")
+
 
         sorted_files = list(nx.topological_sort(nx.DiGraph(dependency_graph.edges)))
         converted_files = []
@@ -573,8 +588,11 @@ async def process_files(
             context = "\n".join([summary.summary for summary in summaries if summary.file_name in dependencies])
 
             # Convert file
+            yield from stream_output("Converting {file} with context from dependencies: {dependencies}")
+
             print(f"Converting {file} with context from dependencies: {dependencies}")
             converted_file = convert_cobol_to_python(os.path.join(folder_path, file), context)
+            yield from stream_output("Using AI agent to check the code execution...")
 
             print("Using AI agent to check the code execution...")
             parsed_code = converted_file.completePythonCode.replace("```python\n", "").replace("```python", "").replace("```", "")
@@ -586,11 +604,12 @@ async def process_files(
                 "converted_code": parsed_code,
                 "test_code": parsed_test,
             })
+        yield from stream_output("File processing completed successfully")
 
         return JSONResponse(content={"status": "success", "converted_files": converted_files})
 
     except Exception as e:
-        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+        return StreamingResponse(generate(), media_type="text/event-stream")
 
 @app.get("/")
 def root():

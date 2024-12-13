@@ -1,9 +1,8 @@
 import os
 import shutil
 import requests
-from typing import List
 
-def test_process_files():
+def test_process_files_with_streaming():
     folder_path = "test_uploads"
 
     # Ensure the test folder is clean
@@ -45,23 +44,21 @@ def test_process_files():
         "folder_path": folder_path
     }
 
-    # Make POST request to the endpoint
+    # Make POST request to the endpoint with streaming enabled
     url = "http://localhost:8000/process"
-    response = requests.post(url, data=data, files=files)
+    response = requests.post(url, data=data, files=files, stream=True)
 
     # Check response status
     assert response.status_code == 200, f"Response failed: {response.text}"
 
-    # Validate response content
-    response_json = response.json()
-    assert response_json["status"] == "success", f"Unexpected status: {response_json}"
-    assert "converted_files" in response_json, "Missing 'converted_files' in response"
-
-    converted_files = response_json["converted_files"]
-    assert len(converted_files) == len(test_files), "Mismatch in number of converted files"
+    # Process the streamed response
+    print("Processing streamed response:")
+    for chunk in response.iter_content(chunk_size=1024):
+        if chunk:  # Filter out keep-alive new chunks
+            print(chunk.decode("utf-8"))
 
     # Clean up
     shutil.rmtree(folder_path)
 
 if __name__ == "__main__":
-    test_process_files()
+    test_process_files_with_streaming()
