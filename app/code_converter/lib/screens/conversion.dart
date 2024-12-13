@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:http/http.dart' as http;
+import 'package:google_fonts/google_fonts.dart';
 import 'dart:convert';
-import 'package:dio/dio.dart';
 import 'dart:html' as html;
-import 'dart:typed_data';
 
 class ConversionScreen extends StatefulWidget {
   final String accessToken;
@@ -12,75 +10,89 @@ class ConversionScreen extends StatefulWidget {
   final String folderPath;
 
   const ConversionScreen({
-    super.key,
+    Key? key,
     required this.accessToken,
     required this.repository,
     required this.folderPath,
-  });
+  }) : super(key: key);
 
   @override
   State<ConversionScreen> createState() => _ConversionScreenState();
 }
 
-class _ConversionScreenState extends State<ConversionScreen> {
+class _ConversionScreenState extends State<ConversionScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   bool isProcessing = false;
-  double downloadProgress = 0.0;
-  double uploadProgress = 0.0;
-  List<Map<String, dynamic>> convertedFiles = [];
+  List<String> terminalLogs = [];
+  List<FileData> originalFiles = [];
+  List<FileData> convertedFiles = [];
   String? error;
-  final dio = Dio();
-  List<Uint8List> downloadedFiles = [];
-  List<String> fileNames = [];
-  
+  double progress = 0.0;
+
+  // Metrics
+  double temperature = 0.6;
+  int maxLength = 2200;
+  double topP = 0.4;
+
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     startProcessing();
   }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  void addLog(String message) {
+    setState(() {
+      terminalLogs.add(message);
+    });
+  }
+
+
+
+
+
 
   Future<void> startProcessing() async {
     setState(() {
       isProcessing = true;
       error = null;
-      downloadedFiles.clear();
-      fileNames.clear();
+      originalFiles.clear();
+      convertedFiles.clear();
+      terminalLogs.clear();
     });
 
     try {
-      // Step 1: Download files from GitHub
-      await downloadGithubFolder();
-      setState(() => downloadProgress = 1.0);
+      addLog('> Initializing conversion environment');
+      await Future.delayed(const Duration(seconds: 1));
 
-      // Step 2: Upload files to conversion server
-      final response = await uploadFiles();
-      setState(() => uploadProgress = 1.0);
+      addLog('> Loading repository: ${widget.folderPath}');
+      await fetchGithubFiles();
 
-      // Step 3: Process conversion results
-      if (response.statusCode == 200) {
-        final result = json.decode(response.body);
-        if (result['status'] == 'success') {
-          setState(() {
-            convertedFiles = List<Map<String, dynamic>>.from(result['converted_files']);
-          });
-        } else {
-          throw Exception(result['message']);
-        }
-      } else {
-        throw Exception('Server error: ${response.statusCode}');
+      if (originalFiles.isNotEmpty) {
+        addLog('> Processing files for conversion');
+        await processFiles();
       }
     } catch (e) {
       setState(() => error = e.toString());
+      addLog('> Error: $e');
     } finally {
       setState(() => isProcessing = false);
     }
   }
 
-  Future<void> downloadGithubFolder() async {
+  Future<void> fetchGithubFiles() async {
     try {
       final contentsUrl = widget.repository['contents_url']
           .toString()
           .replaceAll('{+path}', widget.folderPath);
-          
+
       final response = await http.get(
         Uri.parse(contentsUrl),
         headers: {
@@ -92,177 +104,394 @@ class _ConversionScreenState extends State<ConversionScreen> {
       if (response.statusCode == 200) {
         final contents = json.decode(response.body) as List;
         
-        for (var i = 0; i < contents.length; i++) {
-          final file = contents[i];
+        for (var file in contents) {
           if (file['type'] == 'file') {
-            final downloadUrl = file['download_url'];
-            final fileName = file['name'];
-            
-            final fileResponse = await dio.get<Uint8List>(
-              downloadUrl,
-              options: Options(responseType: ResponseType.bytes),
-              onReceiveProgress: (received, total) {
-                setState(() {
-                  downloadProgress = (i + received / total) / contents.length;
-                });
-              },
-            );
-            
-            if (fileResponse.data != null) {
-              downloadedFiles.add(fileResponse.data!);
-              fileNames.add(fileName);
-            }
+            final fileContent = await fetchFileContent(file['download_url']);
+            setState(() {
+              originalFiles.add(FileData(
+                name: file['name'],
+                content: fileContent,
+                size: file['size'],
+                type: 'COBOL',
+              ));
+            });
           }
         }
+        addLog('> Found ${originalFiles.length} files to convert');
       }
     } catch (e) {
-      throw Exception('Failed to download files: $e');
+      throw Exception('Failed to fetch files: $e');
     }
   }
 
-  Future<http.Response> uploadFiles() async {
+  Future<String> fetchFileContent(String url) async {
     try {
-      final url = Uri.parse('https://code-converter-pte2.onrender.com/process');
+      final response = await http.get(Uri.parse(url));
+      return response.body;
+    } catch (e) {
+      throw Exception('Failed to fetch file content: $e');
+    }
+  }
+
+  Future<void> processFiles() async {
+    try {
+      final url = Uri.parse('http://127.0.0.1:8000/process');
       var request = http.MultipartRequest('POST', url)
         ..fields['folder_path'] = widget.folderPath;
 
-      for (var i = 0; i < downloadedFiles.length; i++) {
-        final fileBytes = downloadedFiles[i];
-        final fileName = fileNames[i];
-        
+      for (var file in originalFiles) {
         request.files.add(
-          http.MultipartFile.fromBytes(
+          http.MultipartFile.fromString(
             'files',
-            fileBytes,
-            filename: fileName,
+            file.content,
+            filename: file.name,
           ),
         );
-        
-        setState(() {
-          uploadProgress = (i + 1) / downloadedFiles.length;
-        });
       }
 
+      addLog('> Uploading files for conversion');
       final streamedResponse = await request.send();
-      return await http.Response.fromStream(streamedResponse);
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        final result = json.decode(response.body);
+        if (result['status'] == 'success') {
+          setState(() {
+            convertedFiles = (result['converted_files'] as List)
+                .map((file) => FileData(
+                      name: file['file_name'].toString().replaceAll('.cbl', '.py'),
+                      content: file['converted_code'],
+                      type: 'Python',
+                      size: utf8.encode(file['converted_code']).length,
+                    ))
+                .toList();
+          });
+          
+          addLog('> Conversion completed successfully');
+          _tabController.animateTo(1); // Switch to converted files tab
+        } else {
+          throw Exception(result['message']);
+        }
+      } else {
+        throw Exception('Server error: ${response.statusCode}');
+      }
     } catch (e) {
-      throw Exception('Failed to upload files: $e');
+      throw Exception('Failed to process files: $e');
     }
   }
 
-  void downloadConvertedFile(String fileName, String code) {
-    // Create a Blob containing the file content
-    final bytes = utf8.encode(code);
+  void downloadFile(FileData file) {
+    final bytes = utf8.encode(file.content);
     final blob = html.Blob([bytes]);
-    
-    // Create a download URL
     final url = html.Url.createObjectUrlFromBlob(blob);
-    
-    // Create an anchor element and trigger download
+
     final anchor = html.AnchorElement(href: url)
-      ..setAttribute("download", fileName.replaceAll('.cbl', '.py'))
+      ..setAttribute("download", file.name)
       ..click();
 
-    // Clean up
     html.Url.revokeObjectUrl(url);
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('File download started')),
+      SnackBar(content: Text('Downloading ${file.name}')),
+    );
+  }
+
+  Widget _buildFileList(List<FileData> files, String title) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            title,
+            style: GoogleFonts.inter(
+              color: Colors.grey[300],
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        Expanded(
+          child: files.isEmpty
+              ? Center(
+                  child: Text(
+                    'No files available',
+                    style: GoogleFonts.inter(color: Colors.grey[500]),
+                  ),
+                )
+              : ListView.builder(
+                  itemCount: files.length,
+                  itemBuilder: (context, index) {
+                    final file = files[index];
+                    return ListTile(
+                      dense: true,
+                      leading: Icon(
+                        Icons.code,
+                        size: 20,
+                        color: file.type == 'COBOL' ? Colors.orange : Colors.blue,
+                      ),
+                      title: Text(
+                        file.name,
+                        style: GoogleFonts.inter(
+                          color: Colors.grey[300],
+                          fontSize: 14,
+                        ),
+                      ),
+                      subtitle: Text(
+                        '${(file.size / 1024).toStringAsFixed(1)} KB',
+                        style: GoogleFonts.inter(
+                          color: Colors.grey[500],
+                          fontSize: 12,
+                        ),
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.download, size: 20),
+                        color: Colors.grey[400],
+                        onPressed: () => downloadFile(file),
+                      ),
+                      onTap: () => _showFilePreview(file),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  void _showFilePreview(FileData file) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        child: Container(
+          width: MediaQuery.of(context).size.width * 0.6,
+          height: MediaQuery.of(context).size.height * 0.8,
+          padding: const EdgeInsets.all(16),
+          color: const Color(0xFF1E1E1E),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    file.name,
+                    style: GoogleFonts.inter(
+                      color: Colors.grey[300],
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    color: Colors.grey[400],
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF252526),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      file.content,
+                      style: GoogleFonts.firaCode(
+                        color: Colors.grey[300],
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTerminalWindow() {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Colors.grey.withOpacity(0.2),
+          width: 1,
+        ),
+      ),
+      margin: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.3),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+            ),
+            child: Row(
+              children: [
+                ...['#FF5F56', '#FFBD2E', '#27C93F'].map((color) => Container(
+                      width: 12,
+                      height: 12,
+                      margin: const EdgeInsets.only(right: 8),
+                      decoration: BoxDecoration(
+                        color: Color(
+                            int.parse(color.substring(1), radix: 16) | 0xFF000000),
+                        shape: BoxShape.circle,
+                      ),
+                    )),
+                const Spacer(),
+                Text(
+                  'Terminal',
+                  style: GoogleFonts.firaCode(
+                    color: Colors.grey[400],
+                    fontSize: 12,
+                  ),
+                ),
+                const Spacer(),
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: terminalLogs
+                    .map(
+                      (log) => Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          log,
+                          style: GoogleFonts.firaCode(
+                            color: Colors.grey[300],
+                            fontSize: 14,
+                            height: 1.5,
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.3),
+      ),
+      child: Row(
+        children: [
+          Text(
+            'Status: ${isProcessing ? "Processing" : "Ready"}',
+            style: GoogleFonts.inter(color: Colors.grey[400], fontSize: 12),
+          ),
+          const Spacer(),
+          Text(
+            'Temperature: $temperature',
+            style: GoogleFonts.inter(color: Colors.grey[400], fontSize: 12),
+          ),
+          const SizedBox(width: 16),
+          Text(
+            'Max Length: $maxLength',
+            style: GoogleFonts.inter(color: Colors.grey[400], fontSize: 12),
+          ),
+          const SizedBox(width: 16),
+          Text(
+            'Top P: $topP',
+            style: GoogleFonts.inter(color: Colors.grey[400], fontSize: 12),
+          ),
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Converting COBOL to Python'),
-      ),
+      backgroundColor: const Color(0xFF1E1E1E),
       body: Column(
         children: [
-          if (isProcessing) ...[
-            LinearProgressIndicator(value: downloadProgress),
-            const SizedBox(height: 8),
-            Text('Downloading files: ${(downloadProgress * 100).toStringAsFixed(1)}%'),
-            const SizedBox(height: 16),
-            LinearProgressIndicator(value: uploadProgress),
-            const SizedBox(height: 8),
-            Text('Processing files: ${(uploadProgress * 100).toStringAsFixed(1)}%'),
-          ],
-          
-          if (error != null)
-            Card(
-              margin: const EdgeInsets.all(16),
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.error_outline,
-                      color: Theme.of(context).colorScheme.error,
-                      size: 32,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Conversion Error',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(error!),
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      onPressed: startProcessing,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Retry'),
-                    ),
-                  ],
+          Expanded(
+            child: Row(
+              children: [
+                // Left side - Terminal
+                Expanded(
+                  flex: 2,
+                  child: _buildTerminalWindow(),
                 ),
-              ),
-            ),
-            
-          if (convertedFiles.isNotEmpty)
-            Expanded(
-              child: Card(
-                margin: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(
-                        'Converted Files',
-                        style: Theme.of(context).textTheme.titleLarge,
+                // Right side - Tabs
+                Expanded(
+                  flex: 1,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF252526),
+                      border: Border(
+                        left: BorderSide(
+                          color: Colors.grey.withOpacity(0.2),
+                          width: 1,
+                        ),
                       ),
                     ),
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: convertedFiles.length,
-                        itemBuilder: (context, index) {
-                          final file = convertedFiles[index];
-                          return ListTile(
-                            leading: const Icon(Icons.file_present),
-                            title: Text(file['file_name']),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.download),
-                              onPressed: () => downloadConvertedFile(
-                                file['file_name'],
-                                file['converted_code'],
-                              ),
-                            ),
-                          ).animate().fadeIn(
-                            delay: Duration(milliseconds: index * 100),
-                          );
-                        },
-                      ),
+                    child: Column(
+                      children: [
+                        TabBar(
+                          controller: _tabController,
+                          tabs: const [
+                            Tab(text: 'Original Files'),
+                            Tab(text: 'Converted Files'),
+                          ],
+                          labelStyle: GoogleFonts.inter(fontSize: 14),
+                          labelColor: Colors.blue,
+                          unselectedLabelColor: Colors.grey[400],
+                          indicatorColor: Colors.blue,
+                        ),
+                        Expanded(
+                          child: TabBarView(
+                            controller: _tabController,
+                            children: [
+                              _buildFileList(
+                                  originalFiles, 'Files for Conversion'),
+                              _buildFileList(convertedFiles, 'Converted Files'),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
+          ),
+          _buildStatusBar(),
         ],
       ),
     );
   }
+}
+
+class FileData {
+  final String name;
+  final String content;
+  final int size;
+  final String type;
+
+  FileData({
+    required this.name,
+    required this.content,
+    required this.size,
+    required this.type,
+  });
 }

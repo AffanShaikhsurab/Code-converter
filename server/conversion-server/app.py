@@ -475,6 +475,7 @@ def ai_agent(code_string: str, testCase: str, file_name: str, folder_path: str, 
 # Summarize each file
 def summarize_file(file_path: str) -> FileSummary:
     """Summarize the content of a COBOL file using Groq."""
+    print("Processing file ")
     with open(file_path, 'r') as file:
         content = file.read()
 
@@ -488,7 +489,8 @@ def summarize_file(file_path: str) -> FileSummary:
     )
 
     summary = response.choices[0].message.content.strip()
-    
+    os.makedirs(os.path.dirname("./cobol/summary/"), exist_ok=True)
+
     with open(f"./cobol/summary/{os.path.basename(file_path)}", 'w') as file:
         file.write(summary)
         
@@ -512,12 +514,13 @@ def analyze_dependencies(summaries: List[FileSummary]) -> DependencyGraph:
     )
 app = FastAPI()
 # Add CORS middleware
+# Add CORS middleware to allow all origins, methods, and headers
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Update this list with allowed origins for better security
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"],  # Allows requests from all origins
+    allow_credentials=True,  # Allows credentials (e.g., cookies or auth headers)
+    allow_methods=["*"],  # Allows all HTTP methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allows all headers in requests
 )
 
 
