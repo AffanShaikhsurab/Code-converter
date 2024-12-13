@@ -1,8 +1,10 @@
 import 'package:code_converter/auth.dart';
 import 'package:code_converter/main.dart';
+import 'package:code_converter/screens/home.dart';
 import 'package:code_converter/screens/repo.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_web_auth/flutter_web_auth.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:url_launcher/url_launcher.dart';
@@ -22,9 +24,58 @@ class _GithubAuthScreenState extends State<GithubAuthScreen> {
  @override
   void initState() {
     super.initState();
+    _checkForCallbackUrl();
     _checkExistingAuth();
   }
 
+  // Check if the URL contains '/callback' and extract the code
+  Future<void> _checkForCallbackUrl() async {
+    print("url is ${Uri.base}");
+    print("callback is ${Uri.base.path.contains('/callback')}");
+    print("query is ${Uri.base.queryParameters['code']}");
+    final Uri currentUri = Uri.base;  // Get the current URL of the web page
+    if (currentUri.path.contains('/callback')) {
+      final String? code = currentUri.queryParameters['code'];
+      if (code != null) {
+        accessToken = await exchangeCodeForToken(code);
+        showCongratulationsDialog(
+          context
+        );
+        // Save the token using your new AuthService (if you have one)
+        await AuthService.saveToken(accessToken!);
+
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => RepositoryListScreen(accessToken: accessToken!,),
+            ),
+          );
+        }
+    
+        setState(() {});
+      }
+    }
+  }
+  void showCongratulationsDialog(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        title: Text('🎉 Congratulations!'),
+        content: Text('You have successfully authenticated and logged in! Your access token has been securely retrieved and you are now ready to explore your repositories.'),
+        actions: <Widget>[
+          TextButton(
+            child: Text('Let\'s Go!'),
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      );
+    },
+  );
+}
   Future<void> _checkExistingAuth() async {
     final token = await AuthService.getToken();
     if (token != null) {
@@ -36,10 +87,14 @@ class _GithubAuthScreenState extends State<GithubAuthScreen> {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (context) => RepositoryListScreen(accessToken: token),
+        builder: (context) => DashboardScreen(accessToken: token),
       ),
     );
   }
+ 
+  // Use the hosted URL for redirect_uri
+  final String redirectUri = 'https://legacy-code-converter.web.app/callback';
+
   Future<void> authorizeGithub() async {
     setState(() {
       isAuthorizing = true;
@@ -47,43 +102,40 @@ class _GithubAuthScreenState extends State<GithubAuthScreen> {
     });
 
     try {
+      // GitHub OAuth URL with client_id and redirect URI
       final Uri authUrl = Uri.parse(
         'https://github.com/login/oauth/authorize'
         '?client_id=Ov23liUyXsesP4nHuerk'
-        '&redirect_uri=http://localhost:8000/callback'
+        '&redirect_uri=$redirectUri'
         '&scope=repo',
       );
 
-      if (await canLaunchUrl(authUrl)) {
-        await launchUrl(authUrl);
-        final String? callbackUrl = await showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => const CallbackUrlDialog(),
-        );
+      // Use flutter_web_auth to authenticate the user
+      final result = await FlutterWebAuth.authenticate(
+        url: authUrl.toString(),
+        callbackUrlScheme: "https", // The scheme should match the redirect_uri
+      );
 
-        if (callbackUrl != null) {
-          final code = Uri.parse(callbackUrl).queryParameters['code'];
-          if (code != null) {
-            accessToken = await exchangeCodeForToken(code);
-              // Save the token using our new AuthService
-            await AuthService.saveToken(accessToken!);
-            
-           
-            if (mounted) {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                  builder: (context) =>  RepositoryListScreen(accessToken: accessToken!,),
-                ),
-              );
-            }
-          }
+      // Extract the authorization code from the result URL
+      final String? code = Uri.parse(result).queryParameters['code'];
+      if (code != null) {
+        // Use the code to exchange for an access token
+        accessToken = await exchangeCodeForToken(code);
+        
+        // Save the token using your new AuthService (if you have one)
+        await AuthService.saveToken(accessToken!);
+
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => RepositoryListScreen(accessToken: accessToken!,),
+            ),
+          );
         }
       }
     } catch (e) {
       setState(() {
-        print('Failed to authorize: ${e.toString()}');
         error = 'Failed to authorize: ${e.toString()}';
       });
     } finally {
@@ -92,26 +144,32 @@ class _GithubAuthScreenState extends State<GithubAuthScreen> {
       });
     }
   }
-
-  Future<String> exchangeCodeForToken(String code) async {
+Future<String> exchangeCodeForToken(String code) async {
+  try {
+    // Replace this URL with your FastAPI backend URL
     final response = await http.post(
-      Uri.parse('https://github.com/login/oauth/access_token'),
-      headers: {'Accept': 'application/json'},
-      body: {
-        'client_id': 'Ov23liUyXsesP4nHuerk',
-        'client_secret': '1a12db1d38254b29284f9752e57374aa6936e789',
-        'code': code,
-        'redirect_uri': 'http://localhost:8000/callback',
-      },
+      Uri.parse('https://github-auth-server.onrender.com/exchange_code'), // Update with your backend URL
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({'code': code}), // Sending code to the backend
     );
 
-    if (response.statusCode != 200) {
-      throw Exception('Failed to exchange code for token');
-    }
+    if (response.statusCode == 200) {
+      // Parse the access token from the response
+      final tokenData = json.decode(response.body);
+      final accessToken = tokenData['access_token'];
 
-    final tokenData = json.decode(response.body);
-    return tokenData['access_token'];
+      if (accessToken != null) {
+        return accessToken;
+      } else {
+        throw Exception('Failed to retrieve access token');
+      }
+    } else {
+      throw Exception('Failed to exchange code for token. Status: ${response.statusCode}');
+    }
+  } catch (e) {
+    throw Exception('Error exchanging code for token: ${e.toString()}');
   }
+}
 
   @override
   Widget build(BuildContext context) {

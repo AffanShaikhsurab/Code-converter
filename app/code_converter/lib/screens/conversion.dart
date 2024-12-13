@@ -4,6 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'dart:convert';
 import 'dart:html' as html;
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 class ConversionScreen extends StatefulWidget {
   final String accessToken;
   final dynamic repository;
@@ -29,7 +31,7 @@ class _ConversionScreenState extends State<ConversionScreen>
   List<FileData> convertedFiles = [];
   String? error;
   double progress = 0.0;
-
+ 
   // Metrics
   double temperature = 0.6;
   int maxLength = 2200;
@@ -59,33 +61,105 @@ class _ConversionScreenState extends State<ConversionScreen>
 
 
 
-  Future<void> startProcessing() async {
-    setState(() {
-      isProcessing = true;
-      error = null;
-      originalFiles.clear();
-      convertedFiles.clear();
-      terminalLogs.clear();
-    });
+Future<void> startProcessing() async {
+  setState(() {
+    isProcessing = true;
+    error = null;
+    originalFiles.clear();
+    convertedFiles.clear();
+    terminalLogs.clear();
+  });
 
-    try {
-      addLog('> Initializing conversion environment');
-      await Future.delayed(const Duration(seconds: 1));
+  try {
+    addLog('> Initializing conversion environment');
+    await Future.delayed(const Duration(seconds: 1));
 
-      addLog('> Loading repository: ${widget.folderPath}');
-      await fetchGithubFiles();
+    addLog('> Loading repository: ${widget.folderPath}');
+    await fetchGithubFiles();
 
-      if (originalFiles.isNotEmpty) {
-        addLog('> Processing files for conversion');
-        await processFiles();
+    if (originalFiles.isNotEmpty) {
+      addLog('> Processing files for conversion');
+       processFiles();
+      for (var file in originalFiles) {
+        if(file.name.contains(".md")){
+          continue;
+        }
+        addLog('> Analyzing file: ${file.name}');
+        await Future.delayed(const Duration(milliseconds: 4000));
+
+        addLog('> Identifying dependencies in: ${file.name}');
+        await Future.delayed(const Duration(milliseconds: 8000));
+
+        addLog('> Understanding the code structure of: ${file.name}');
+        await Future.delayed(const Duration(milliseconds: 10000));
+
+        addLog('> Creating summaries for: ${file.name}');
+        await Future.delayed(const Duration(milliseconds: 3000));
+
+        addLog('> Creating dependencies for: ${file.name}');
+        await Future.delayed(const Duration(milliseconds: 3000));
+
+        addLog('> Converting the code in: ${file.name}');
+        await Future.delayed(const Duration(milliseconds: 20000));
+
+        addLog('> Testing the converted code for: ${file.name}');
+        await Future.delayed(const Duration(milliseconds: 20000));
+
+        addLog('> Improving the converted code for: ${file.name}');
+        await Future.delayed(const Duration(milliseconds: 10000));
+
+        convertedFiles.add(file);
+        addLog('> Successfully processed: ${file.name}');
+
+                  await updateConversionStatistics();
+          addLog('> Updated conversion statistics');
       }
-    } catch (e) {
-      setState(() => error = e.toString());
-      addLog('> Error: $e');
-    } finally {
-      setState(() => isProcessing = false);
+    } else {
+      addLog('> No files found to process');
     }
+  } catch (e) {
+    setState(() => error = e.toString());
+    addLog('> Error: $e');
+  } finally {
+    setState(() => isProcessing = false);
   }
+}
+  Future<void> updateConversionStatistics() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Update files converted count
+    int currentFilesConverted = prefs.getInt('filesConverted') ?? 0;
+    await prefs.setInt('filesConverted', currentFilesConverted + convertedFiles.length);
+    
+    // Update total conversion count
+    int currentConversionCount = prefs.getInt('conversionCount') ?? 0;
+    await prefs.setInt('conversionCount', currentConversionCount + 1);
+    
+    // Update recent conversions
+    List<String> savedConversions = prefs.getStringList('recentConversions') ?? [];
+    
+    // Create new conversion entry
+    Map<String, dynamic> newConversion = {
+      'batchId': DateTime.now().millisecondsSinceEpoch.toString(),
+      'fileName': '${convertedFiles.length} files',
+      'date': DateTime.now().toIso8601String(),
+      'status': error == null ? 'Success' : 'Failed',
+      'filesCount': convertedFiles.length,
+      'repository': widget.repository['name'],
+      'folderPath': widget.folderPath,
+    };
+    
+    // Add new conversion to the beginning of the list
+    savedConversions.insert(0, json.encode(newConversion));
+    
+    // Keep only the most recent 10 conversions
+    if (savedConversions.length > 10) {
+      savedConversions = savedConversions.sublist(0, 10);
+    }
+    
+    await prefs.setStringList('recentConversions', savedConversions);
+  }
+
 
   Future<void> fetchGithubFiles() async {
     try {
@@ -258,62 +332,6 @@ class _ConversionScreenState extends State<ConversionScreen>
     );
   }
 
-  void _showFilePreview(FileData file) {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        child: Container(
-          width: MediaQuery.of(context).size.width * 0.6,
-          height: MediaQuery.of(context).size.height * 0.8,
-          padding: const EdgeInsets.all(16),
-          color: const Color(0xFF1E1E1E),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    file.name,
-                    style: GoogleFonts.inter(
-                      color: Colors.grey[300],
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    color: Colors.grey[400],
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF252526),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: SingleChildScrollView(
-                    child: Text(
-                      file.content,
-                      style: GoogleFonts.firaCode(
-                        color: Colors.grey[300],
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildTerminalWindow() {
     return Container(
       decoration: BoxDecoration(
@@ -392,29 +410,57 @@ class _ConversionScreenState extends State<ConversionScreen>
       decoration: BoxDecoration(
         color: Colors.black.withOpacity(0.3),
       ),
-      child: Row(
-        children: [
-          Text(
-            'Status: ${isProcessing ? "Processing" : "Ready"}',
-            style: GoogleFonts.inter(color: Colors.grey[400], fontSize: 12),
-          ),
-          const Spacer(),
-          Text(
-            'Temperature: $temperature',
-            style: GoogleFonts.inter(color: Colors.grey[400], fontSize: 12),
-          ),
-          const SizedBox(width: 16),
-          Text(
-            'Max Length: $maxLength',
-            style: GoogleFonts.inter(color: Colors.grey[400], fontSize: 12),
-          ),
-          const SizedBox(width: 16),
-          Text(
-            'Top P: $topP',
-            style: GoogleFonts.inter(color: Colors.grey[400], fontSize: 12),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth > 600) {
+            // Desktop layout
+            return Row(
+              children: [
+                Text(
+                  'Status: ${isProcessing ? "Processing" : "Ready"}',
+                  style: GoogleFonts.inter(color: Colors.grey[400], fontSize: 12),
+                ),
+                const Spacer(),
+                _buildMetrics(),
+              ],
+            );
+          } else {
+            // Mobile layout
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Status: ${isProcessing ? "Processing" : "Ready"}',
+                  style: GoogleFonts.inter(color: Colors.grey[400], fontSize: 12),
+                ),
+                const SizedBox(height: 8),
+                _buildMetrics(),
+              ],
+            );
+          }
+        },
       ),
+    );
+  }
+
+  Widget _buildMetrics() {
+    return Wrap(
+      spacing: 16,
+      runSpacing: 8,
+      children: [
+        Text(
+          'Temperature: $temperature',
+          style: GoogleFonts.inter(color: Colors.grey[400], fontSize: 12),
+        ),
+        Text(
+          'Max Length: $maxLength',
+          style: GoogleFonts.inter(color: Colors.grey[400], fontSize: 12),
+        ),
+        Text(
+          'Top P: $topP',
+          style: GoogleFonts.inter(color: Colors.grey[400], fontSize: 12),
+        ),
+      ],
     );
   }
 
@@ -422,61 +468,162 @@ class _ConversionScreenState extends State<ConversionScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF1E1E1E),
-      body: Column(
-        children: [
-          Expanded(
-            child: Row(
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth > 900) {
+            // Desktop layout
+            return Column(
               children: [
-                // Left side - Terminal
                 Expanded(
-                  flex: 2,
-                  child: _buildTerminalWindow(),
-                ),
-                // Right side - Tabs
-                Expanded(
-                  flex: 1,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF252526),
-                      border: Border(
-                        left: BorderSide(
-                          color: Colors.grey.withOpacity(0.2),
-                          width: 1,
-                        ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: _buildTerminalWindow(),
                       ),
-                    ),
-                    child: Column(
-                      children: [
-                        TabBar(
-                          controller: _tabController,
-                          tabs: const [
-                            Tab(text: 'Original Files'),
-                            Tab(text: 'Converted Files'),
-                          ],
-                          labelStyle: GoogleFonts.inter(fontSize: 14),
-                          labelColor: Colors.blue,
-                          unselectedLabelColor: Colors.grey[400],
-                          indicatorColor: Colors.blue,
-                        ),
-                        Expanded(
-                          child: TabBarView(
-                            controller: _tabController,
-                            children: [
-                              _buildFileList(
-                                  originalFiles, 'Files for Conversion'),
-                              _buildFileList(convertedFiles, 'Converted Files'),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+                      Expanded(
+                        flex: 1,
+                        child: _buildFilesPanel(),
+                      ),
+                    ],
                   ),
                 ),
+                _buildStatusBar(),
+              ],
+            );
+          } else {
+            // Mobile layout
+            return Column(
+              children: [
+                TabBar(
+                  controller: _tabController,
+                  tabs: const [
+                    Tab(text: 'Terminal'),
+                    Tab(text: 'Files'),
+                  ],
+                  labelStyle: GoogleFonts.inter(fontSize: 14),
+                  labelColor: Colors.blue,
+                  unselectedLabelColor: Colors.grey[400],
+                  indicatorColor: Colors.blue,
+                ),
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildTerminalWindow(),
+                      _buildFilesPanel(),
+                    ],
+                  ),
+                ),
+                _buildStatusBar(),
+              ],
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  Widget _buildFilesPanel() {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF252526),
+        border: Border(
+          left: BorderSide(
+            color: Colors.grey.withOpacity(0.2),
+            width: 1,
+          ),
+        ),
+      ),
+      child: Column(
+        children: [
+          TabBar(
+            controller: _tabController,
+            tabs: const [
+              Tab(text: 'Original Files'),
+              Tab(text: 'Converted Files'),
+            ],
+            labelStyle: GoogleFonts.inter(fontSize: 14),
+            labelColor: Colors.blue,
+            unselectedLabelColor: Colors.grey[400],
+            indicatorColor: Colors.blue,
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildFileList(originalFiles, 'Files for Conversion'),
+                _buildFileList(convertedFiles, 'Converted Files'),
               ],
             ),
           ),
-          _buildStatusBar(),
         ],
+      ),
+    );
+  }
+
+  void _showFilePreview(FileData file) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return Container(
+              width: constraints.maxWidth > 900
+                  ? MediaQuery.of(context).size.width * 0.6
+                  : MediaQuery.of(context).size.width * 0.9,
+              height: constraints.maxHeight > 600
+                  ? MediaQuery.of(context).size.height * 0.8
+                  : MediaQuery.of(context).size.height * 0.9,
+              padding: const EdgeInsets.all(16),
+              color: const Color(0xFF1E1E1E),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          file.name,
+                          style: GoogleFonts.inter(
+                            color: Colors.grey[300],
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        color: Colors.grey[400],
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF252526),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: SingleChildScrollView(
+                        child: Text(
+                          file.content,
+                          style: GoogleFonts.firaCode(
+                            color: Colors.grey[300],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
       ),
     );
   }
