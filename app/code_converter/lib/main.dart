@@ -21,7 +21,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF6200EE),
-          brightness: Brightness.light,
+          brightness: Brightness.dark,
         ),
         useMaterial3: true,
         textTheme: GoogleFonts.interTextTheme(),
@@ -41,7 +41,7 @@ class CallbackUrlDialog extends StatelessWidget {
     final controller = TextEditingController();
 
     return AlertDialog(
-      title: const Text('Enter Callback URL'),
+      title: const Text('Enter Callback URL' , style: TextStyle(fontWeight: FontWeight.bold , color: Colors.white),),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -50,14 +50,16 @@ class CallbackUrlDialog extends StatelessWidget {
             controller: controller,
             decoration: const InputDecoration(
               hintText: 'Paste the callback URL here',
+              hintStyle: TextStyle(color: Colors.white),
               prefixIcon: Icon(Icons.link),
+              labelStyle: TextStyle(color: Colors.white),
               border: OutlineInputBorder(),
             ),
           ),
           const SizedBox(height: 8),
           Text(
             'Copy the URL from your browser after authorization',
-            style: Theme.of(context).textTheme.bodySmall,
+            style: TextStyle(fontWeight: FontWeight.normal , color: const Color.fromARGB(255, 99, 99, 99)),
           ),
         ],
       ),

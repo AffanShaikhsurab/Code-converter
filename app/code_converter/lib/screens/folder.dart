@@ -1,13 +1,20 @@
-
 import 'package:code_converter/screens/conversion.dart';
-import 'package:code_converter/screens/github.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:graphview/graphview.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+class FolderInfo {
+  final String path;
+  final List<String> cobolFiles;
+
+  FolderInfo({
+    required this.path,
+    required this.cobolFiles,
+  });
+}
+
 class CobolFolderScreen extends StatefulWidget {
   final String accessToken;
   final dynamic repository;
@@ -35,61 +42,59 @@ class _CobolFolderScreenState extends State<CobolFolderScreen> {
     findCobolFolders();
   }
 
-Future<void> findCobolFolders() async {
-  setState(() {
-    isLoading = true;
-    error = null;
-  });
+  Future<void> findCobolFolders() async {
+    setState(() {
+      isLoading = true;
+      error = null;
+    });
 
-  try {
-    final response = await http.get(
-      Uri.parse(widget.repository['contents_url']
-          .toString()
-          .replaceAll('{+path}', '')),
-      headers: {
-        'Authorization': 'Bearer ${widget.accessToken}',
-        'Accept': 'application/json',
-      },
-    );
-
-    if (response.statusCode == 200) {
-      final contents = json.decode(response.body) as List<dynamic>;
-      final folders = <FolderInfo>[];
-
-      // Ensure that we pass a proper Iterable<Future> to Future.wait
-      await Future.wait(
-        contents
-            .where((content) => content['type'] == 'dir')
-            .map<Future<void>>((content) async {
-              final hasCobol = await checkForCobolFiles(
-                content['url'],
-                content['path'],
-              );
-              if (hasCobol.isNotEmpty) {
-                folders.add(FolderInfo(
-                  path: content['path'],
-                  cobolFiles: hasCobol,
-                ));
-              }
-            })
-            .toList(),
+    try {
+      final response = await http.get(
+        Uri.parse(widget.repository['contents_url']
+            .toString()
+            .replaceAll('{+path}', '')),
+        headers: {
+          'Authorization': 'Bearer ${widget.accessToken}',
+          'Accept': 'application/json',
+        },
       );
 
+      if (response.statusCode == 200) {
+        final contents = json.decode(response.body) as List<dynamic>;
+        final folders = <FolderInfo>[];
+
+        await Future.wait(
+          contents
+              .where((content) => content['type'] == 'dir')
+              .map<Future<void>>((content) async {
+                final hasCobol = await checkForCobolFiles(
+                  content['url'],
+                  content['path'],
+                );
+                if (hasCobol.isNotEmpty) {
+                  folders.add(FolderInfo(
+                    path: content['path'],
+                    cobolFiles: hasCobol,
+                  ));
+                }
+              })
+              .toList(),
+        );
+
+        setState(() {
+          cobolFolders = folders;
+          isLoading = false;
+        });
+      } else {
+        throw Exception('Failed to fetch repository contents');
+      }
+    } catch (e) {
       setState(() {
-        cobolFolders = folders;
+        error = e.toString();
         isLoading = false;
       });
-    } else {
-      throw Exception('Failed to fetch repository contents');
     }
-  } catch (e) {
-    setState(() {
-      error = e.toString();
-      isLoading = false;
-    });
   }
-}
-
 
   Future<List<String>> checkForCobolFiles(String url, String path) async {
     try {
@@ -129,35 +134,47 @@ Future<void> findCobolFolders() async {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: isSearching
-            ? TextField(
+        title: Text(
+          'Select COBOL Folder',
+          style: GoogleFonts.montserrat(
+            fontWeight: FontWeight.bold,
+            fontSize: 24,
+          ),
+        ),
+        backgroundColor: const Color.fromARGB(255, 21, 21, 21),
+        elevation: 0,
+        actions: [
+          if (isSearching)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TextField(
                 controller: searchController,
                 autofocus: true,
                 decoration: InputDecoration(
                   hintText: 'Search folders...',
                   border: InputBorder.none,
-                  hintStyle: TextStyle(
+                  hintStyle: GoogleFonts.nunito(
                     color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
                   ),
                 ),
-                style: TextStyle(
+                style: GoogleFonts.nunito(
                   color: Theme.of(context).colorScheme.onSurface,
                 ),
                 onChanged: (_) => setState(() {}),
-              )
-            : const Text('Select COBOL Folder'),
-        actions: [
-          IconButton(
-            icon: Icon(isSearching ? Icons.close : Icons.search),
-            onPressed: () {
-              setState(() {
-                if (isSearching) {
-                  searchController.clear();
-                }
-                isSearching = !isSearching;
-              });
-            },
-          ),
+              ),
+            )
+          else
+            IconButton(
+              icon: Icon(isSearching ? Icons.close : Icons.search),
+              onPressed: () {
+                setState(() {
+                  if (isSearching) {
+                    searchController.clear();
+                  }
+                  isSearching = !isSearching;
+                });
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: isLoading ? null : findCobolFolders,
@@ -204,41 +221,26 @@ Future<void> findCobolFolders() async {
               );
             }
 
-            if (cobolFolders.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.folder_off,
-                      size: 48,
-                      color: Theme.of(context).colorScheme.outline,
-                    ),
-                    const SizedBox(height: 16),
-                    const Text('No COBOL files found in this repository'),
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Select Another Repository'),
-                    ),
-                  ],
-                ),
-              );
-            }
-
             final folders = filteredFolders;
             if (folders.isEmpty) {
-              return const Center(
-                child: Text('No matching folders found'),
+              return Center(
+                child: Text(
+                  'No COBOL files found in this repository',
+                  style: GoogleFonts.nunito(
+                    fontSize: 18,
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                ),
               );
             }
 
             return ListView.builder(
               itemCount: folders.length,
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(16),
               itemBuilder: (context, index) {
                 final folder = folders[index];
                 return Card(
+                  color: const Color(0xFF2F2F2F),
                   margin: const EdgeInsets.symmetric(
                     horizontal: 8,
                     vertical: 4,
@@ -246,17 +248,34 @@ Future<void> findCobolFolders() async {
                   child: ListTile(
                     leading: Badge(
                       label: Text(folder.cobolFiles.length.toString()),
-                      child: const Icon(Icons.folder),
+                      backgroundColor: const Color(0xFF3366FF),
+                      child: Icon(
+                        Icons.folder,
+                        color: Colors.white,
+                      ),
                     ),
-                    title: Text(folder.path),
+                    title: Text(
+                      folder.path,
+                      style: GoogleFonts.nunito(
+                        fontSize: 18,
+                        color: Colors.white,
+                      ),
+                    ),
                     subtitle: Text(
                       'COBOL Files: ${folder.cobolFiles.join(", ")}',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.nunito(
+                        fontSize: 14,
+                        color: Colors.white.withOpacity(0.8),
+                      ),
                     ),
-                    trailing: const Icon(Icons.chevron_right),
+                    trailing: const Icon(
+                      Icons.chevron_right,
+                      color: Colors.white,
+                    ),
                     onTap: () {
-                      Navigator.push(
+                        Navigator.push(
                         context,
                         MaterialPageRoute(
                           builder: (context) => ConversionScreen(
@@ -267,10 +286,10 @@ Future<void> findCobolFolders() async {
                         ),
                       );
                     },
-                  ),
-                ).animate().fadeIn(
-                      delay: Duration(milliseconds: index * 50),
-                    );
+                  ).animate().fadeIn(
+                        delay: Duration(milliseconds: index * 50),
+                      ),
+                );
               },
             );
           },
@@ -279,10 +298,4 @@ Future<void> findCobolFolders() async {
     );
   }
 }
-
-class FolderInfo {
-  final String path;
-  final List<String> cobolFiles;
-
-  FolderInfo({required this.path, required this.cobolFiles});
-}
+ 
