@@ -31,7 +31,9 @@ class _ConversionScreenState extends State<ConversionScreen>
   List<FileData> convertedFiles = [];
   String? error;
   double progress = 0.0;
- 
+   late TabController _mainTabController;
+  late TabController _filesTabController;
+
   // Metrics
   double temperature = 0.6;
   int maxLength = 2200;
@@ -40,13 +42,15 @@ class _ConversionScreenState extends State<ConversionScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+        _mainTabController = TabController(length: 2, vsync: this);
+    _filesTabController = TabController(length: 2, vsync: this);
     startProcessing();
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
+      _mainTabController.dispose();
+    _filesTabController.dispose();
     super.dispose();
   }
 
@@ -323,7 +327,7 @@ Future<void> startProcessing() async {
                         color: Colors.grey[400],
                         onPressed: () => downloadFile(file),
                       ),
-                      onTap: () => _showFilePreview(file),
+                      onTap: () => _showFilePreview(file , context),
                     );
                   },
                 ),
@@ -463,7 +467,6 @@ Future<void> startProcessing() async {
       ],
     );
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -483,7 +486,7 @@ Future<void> startProcessing() async {
                       ),
                       Expanded(
                         flex: 1,
-                        child: _buildFilesPanel(),
+                        child: _buildFilesPanel(isDesktop: true),
                       ),
                     ],
                   ),
@@ -496,7 +499,7 @@ Future<void> startProcessing() async {
             return Column(
               children: [
                 TabBar(
-                  controller: _tabController,
+                  controller: _mainTabController,
                   tabs: const [
                     Tab(text: 'Terminal'),
                     Tab(text: 'Files'),
@@ -508,10 +511,10 @@ Future<void> startProcessing() async {
                 ),
                 Expanded(
                   child: TabBarView(
-                    controller: _tabController,
+                    controller: _mainTabController,
                     children: [
                       _buildTerminalWindow(),
-                      _buildFilesPanel(),
+                      _buildFilesPanel(isDesktop: false),
                     ],
                   ),
                 ),
@@ -524,7 +527,8 @@ Future<void> startProcessing() async {
     );
   }
 
-  Widget _buildFilesPanel() {
+
+  Widget _buildFilesPanel({required bool isDesktop}) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF252526),
@@ -538,7 +542,7 @@ Future<void> startProcessing() async {
       child: Column(
         children: [
           TabBar(
-            controller: _tabController,
+            controller: _filesTabController,
             tabs: const [
               Tab(text: 'Original Files'),
               Tab(text: 'Converted Files'),
@@ -548,21 +552,24 @@ Future<void> startProcessing() async {
             unselectedLabelColor: Colors.grey[400],
             indicatorColor: Colors.blue,
           ),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildFileList(originalFiles, 'Files for Conversion'),
-                _buildFileList(convertedFiles, 'Converted Files'),
-              ],
-            ),
-          ),
+         Expanded(
+  child: GestureDetector(
+    onHorizontalDragUpdate: (_) {}, // Block swipes
+    child: TabBarView(
+      controller: _filesTabController,
+      children: [
+        _buildFileList(originalFiles, 'Files for Conversion'),
+        _buildFileList(convertedFiles, 'Converted Files'),
+      ],
+    ),
+  ),
+),
         ],
       ),
     );
   }
-
-  void _showFilePreview(FileData file) {
+}
+  void _showFilePreview(FileData file , BuildContext context) {
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -627,7 +634,7 @@ Future<void> startProcessing() async {
       ),
     );
   }
-}
+
 
 class FileData {
   final String name;

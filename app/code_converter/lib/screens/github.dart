@@ -87,7 +87,7 @@ class _GithubAuthScreenState extends State<GithubAuthScreen> {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (context) => DashboardScreen(accessToken: token),
+        builder: (context) => RepositoryListScreen(accessToken: token),
       ),
     );
   }
